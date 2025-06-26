@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>観光アンケート (WebSocket)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap; /* 小さい画面での折り返し */
+        }
+        .container {
+            flex: 1; /* 均等な幅 */
+            min-width: 300px; /* 最小幅 */
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], select, textarea {
+            width: calc(100% - 22px); /* パディングとボーダーを考慮 */
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #e9ecef;
+            color: #333;
+            text-align: center;
+            display: none; /* 初期状態では非表示 */
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        #historyContainer {
+            background-color: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            min-height: 200px; /* ある程度の高さを確保 */
+            max-height: 500px; /* 最大高さを設定 */
+            overflow-y: auto; /* 溢れた場合にスクロール */
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+        #historyContainer h2 {
+            margin-top: 0;
+            color: #0056b3;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .answer-item {
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-left: 5px solid #007bff;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            word-wrap: break-word; /* 長いテキストの折り返し */
+        }
+        .answer-item strong {
+            color: #333;
+        }
+        .answer-item p {
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .no-answers {
+            text-align: center;
+            color: #666;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>観光アンケート</h1>
+        <p>あなたの旅行に関する情報を教えてください！</p>
+
+        <form id="surveyForm">
+            <div class="form-group">
+                <label for="name">お名前 (任意):</label>
+                <input type="text" id="name" name="name">
+            </div>
+
+            <div class="form-group">
+                <label for="destination">最も行きたい観光地:</label>
+                <select id="destination" name="destination" required>
+                    <option value="">選択してください</option>
+                    <option value="京都">京都</option>
+                    <option value="沖縄">沖縄</option>
+                    <option value="北海道">北海道</option>
+                    <option value="東京">東京</option>
+                    <option value="海外">海外</option>
+                    <option value="その他">その他</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>旅行の目的:</label><br>
+                <input type="checkbox" id="purposeRelax" name="purpose" value="リラックス"> <label for="purposeRelax">リラックス</label><br>
+                <input type="checkbox" id="purposeGourmet" name="purpose" value="グルメ"> <label for="purposeGourmet">グルメ</label><br>
+                <input type="checkbox" id="purposeCulture" name="purpose" value="文化体験"> <label for="purposeCulture">文化体験</label><br>
+                <input type="checkbox" id="purposeNature" name="purpose" value="自然"> <label for="purposeNature">自然</label><br>
+                <input type="checkbox" id="purposeShopping" name="purpose" value="ショッピング"> <label for="purposeShopping">ショッピング</label><br>
+            </div>
+
+            <div class="form-group">
+                <label for="comment">その他コメント:</label>
+                <textarea id="comment" name="comment" rows="4"></textarea>
+            </div>
+
+            <button type="submit">アンケートを送信</button>
+        </form>
+
+        <div id="status"></div>
+    </div>
+
+    <div class="container">
+        <div id="historyContainer">
+            <h2>これまでの回答履歴</h2>
+            <div id="answersList">
+                <p class="no-answers">まだ回答はありません。</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const websocket = new WebSocket("ws://localhost:8765");
+        const surveyForm = document.getElementById("surveyForm");
+        const statusDiv = document.getElementById("status");
+        const answersList = document.getElementById("answersList");
+
+        // 回答項目をHTML要素として作成して返すヘルパー関数
+        function createAnswerItem(answer) {
+            const answerItem = document.createElement('div');
+            answerItem.className = 'answer-item';
+            answerItem.innerHTML = `
+                <p><strong>お名前:</strong> ${answer.name}</p>
+                <p><strong>行きたい場所:</strong> ${answer.destination}</p>
+                <p><strong>目的:</strong> ${answer.purpose.join(', ')}</p>
+                <p><strong>コメント:</strong> ${answer.comment}</p>
+            `;
+            return answerItem;
+        }
+
+        // 回答履歴を表示する関数
+        function displayAnswers(answers) {
+            answersList.innerHTML = ''; // 既存の内容をクリア
+            if (answers.length === 0) {
+                answersList.innerHTML = '<p class="no-answers">まだ回答はありません。</p>';
+                return;
+            }
+            answers.forEach(answer => {
+                answersList.appendChild(createAnswerItem(answer));
+            });
+            // 最新の回答が表示されるようにスクロール
+            answersList.scrollTop = answersList.scrollHeight;
+        }
+
+        // WebSocket接続が開いたときの処理
+        websocket.onopen = (event) => {
+            console.log("WebSocket接続が開かれました。");
+            statusDiv.textContent = "サーバーに接続しました。アンケートに回答してください。";
+            statusDiv.className = "status-success";
+            statusDiv.style.display = "block";
+        };
+
+        // WebSocketからメッセージを受信したときの処理
+        websocket.onmessage = (event) => {
+            console.log("サーバーからメッセージを受信しました:", event.data);
+            const response = JSON.parse(event.data);
+
+            if (response.type === "history") {
+                // 初回接続時または履歴要求時の全履歴
+                console.log("回答履歴を受信しました:", response.data);
+                displayAnswers(response.data);
+            } else if (response.type === "new_answer") {
+                // 新しい回答が追加された場合の通知
+                console.log("新しい回答が追加されました:", response.data);
+                
+                // 「まだ回答はありません。」のメッセージがあれば削除
+                const noAnswersMessage = answersList.querySelector('.no-answers');
+                if (noAnswersMessage) {
+                    noAnswersMessage.remove();
+                }
+                // 新しい回答要素を作成して追加
+                answersList.appendChild(createAnswerItem(response.data));
+                answersList.scrollTop = answersList.scrollHeight; // 最新の回答が表示されるようにスクロール
+
+            } else if (response.status === "success") {
+                statusDiv.textContent = response.message;
+                statusDiv.className = "status-success";
+            } else {
+                statusDiv.textContent = "エラー: " + response.message;
+                statusDiv.className = "status-error";
+            }
+            statusDiv.style.display = "block";
+        };
+
+        // WebSocket接続が閉じたときの処理
+        websocket.onclose = (event) => {
+            console.log("WebSocket接続が閉じられました。", event);
+            statusDiv.textContent = "サーバーとの接続が切れました。サーバーが起動しているか確認してください。";
+            statusDiv.className = "status-error";
+            statusDiv.style.display = "block";
+        };
+
+        // WebSocketエラーが発生したときの処理
+        websocket.onerror = (event) => {
+            console.error("WebSocketエラーが発生しました:", event);
+            statusDiv.textContent = "WebSocketエラーが発生しました。コンソールを確認してください。";
+            statusDiv.className = "status-error";
+            statusDiv.style.display = "block";
+        };
+
+        // フォームが送信されたときの処理
+        surveyForm.addEventListener("submit", (event) => {
+            event.preventDefault(); // フォームのデフォルトの送信動作をキャンセル
+
+            const name = document.getElementById("name").value || '匿名'; // 名前が未入力の場合「匿名」
+            const destination = document.getElementById("destination").value;
+            
+            const purposeCheckboxes = document.querySelectorAll('input[name="purpose"]:checked');
+            const purposes = Array.from(purposeCheckboxes).map(cb => cb.value);
+
+            const comment = document.getElementById("comment").value;
+
+            // 必須項目チェック
+            if (!destination) {
+                alert("最も行きたい観光地を選択してください。");
+                return;
+            }
+
+            // 送信するデータをJSON形式で作成
+            const surveyData = {
+                type: "survey_response",
+                name: name,
+                destination: destination,
+                purpose: purposes.length > 0 ? purposes : ['未回答'], // 目的が未選択の場合「未回答」
+                comment: comment || 'なし' // コメントが未入力の場合「なし」
+            };
+
+            // WebSocket経由でサーバーにデータを送信
+            if (websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify(surveyData));
+                statusDiv.textContent = "アンケートを送信しました...";
+                statusDiv.className = ""; // ステータス表示をクリア
+                statusDiv.style.display = "block";
+                surveyForm.reset(); // フォームをリセット
+            } else {
+                statusDiv.textContent = "サーバーに接続されていません。再接続を試みてください。";
+                statusDiv.className = "status-error";
+                statusDiv.style.display = "block";
+            }
+        });
+    </script>
+</body>
+</html>
